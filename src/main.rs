@@ -21,21 +21,35 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    fn chop(&mut self, n: usize) -> &'a [char] {
+        let token = &self.content[0..n];
+        self.content = &self.content[n..];
+        token
+    }
+
+    fn chop_while<P>(&mut self, mut predicat: P) -> &'a [char]
+    where
+        P: FnMut(&char) -> bool,
+    {
+        let mut n = 0;
+        while n < self.content.len() && predicat(&self.content[n]) {
+            n += 1;
+        }
+        self.chop(n)
+    }
+
     fn next_token(&mut self) -> Option<&'a [char]> {
         self.trim_left();
-        if self.content.len() == 0 {
+        if self.content.is_empty() {
             return None;
         }
-        if self.content[0].is_alphabetic() {
-            let mut n = 0;
-            while n < self.content.len() && self.content[0].is_alphanumeric() {
-                n += 1;
-            }
-            let token = &self.content[0..n];
-            self.content = &self.content[n..];
-            return Some(token);
+        if self.content[0].is_numeric() {
+            return Some(self.chop_while(|x| x.is_numeric()));
         }
-        todo!()
+        if self.content[0].is_alphabetic() {
+            return Some(self.chop_while(|x| x.is_alphanumeric()));
+        }
+        Some(self.chop(1))
     }
 }
 
@@ -52,10 +66,10 @@ fn index(content: &str) -> HashMap<String, usize> {
 
 fn read_entire_xml_file<P: AsRef<Path>>(file_path: P) -> io::Result<String> {
     let file = File::open(file_path)?;
-    let eventReader = EventReader::new(file);
+    let event_reader = EventReader::new(file);
 
     let mut content = String::new();
-    for event in eventReader.into_iter() {
+    for event in event_reader.into_iter() {
         if let XmlEvent::Characters(text) = event.expect("TODO: ") {
             content.push_str(&text);
             content.push_str(" ");
@@ -64,20 +78,34 @@ fn read_entire_xml_file<P: AsRef<Path>>(file_path: P) -> io::Result<String> {
     Ok(content)
 }
 fn main() -> io::Result<()> {
-    let content = read_entire_xml_file("docs.gl/gl4/glVertexAttribDivisor.xhtml")?
-        .chars()
-        .collect::<Vec<_>>();
+    let dir_path = "docs.gl/gl4";
+    let dir = fs::read_dir(dir_path)?;
+    for file in dir {
+        let file_path = file?.path();
+        let content = read_entire_xml_file(&file_path)?
+            .chars()
+            .collect::<Vec<_>>();
 
-    for token in Lexer::new(&content) {
-        println!("{token:?}");
+        let mut tf = HashMap::<String, usize>::new();
+
+        for token in Lexer::new(&content) {
+            let term = token
+                .iter()
+                .map(|x| x.to_ascii_uppercase())
+                .collect::<String>();
+            if let Some(freq) = tf.get_mut(&term) {
+                *freq += 1;
+            } else {
+                tf.insert(term, 1);
+            }
+        }
+        let mut stats = tf.iter().collect::<Vec<_>>();
+        stats.sort_by_key(|(_, f)| *f);
+        stats.reverse();
+        println!("{file_path:?}");
+        for (t, f) in stats.iter().take(10) {
+            println!("{t} => {f}")
+        }
     }
-    // let all_documents = HashMap::<Path, HashMap<String, usize>>::new();
-    // let dir_path = "docs.gl/gl4/";
-    // let dir = fs::read_dir(dir_path)?;
-    // for file in dir {
-    //     let file_path = file?.path();
-    //     let content = read_entire_xml_file(&file_path)?;
-    //     println!("{file_path:?} => {size}", size = content.len());
-    // }
     Ok(())
 }
